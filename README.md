@@ -18,7 +18,7 @@ Derived metrics include annual energy generation (kWh), estimated annual savings
 
 ## Key Finding
 
-Los Angeles generates the most solar energy (~1,737 kWh/year) but New York produces the second-highest annual savings (~$362) despite weaker irradiance, due to its high electricity price of 28.55¢/kWh. Electricity price is as important as solar resource when evaluating rooftop solar investment.
+Los Angeles generates the most solar energy (1,737 kWh/year) but New York produces the second-highest annual savings ($362) despite weaker irradiance, due to its high electricity price of 28.55¢/kWh. Electricity price is as important as solar resource when evaluating rooftop solar investment.
 
 ## Requirements
 
