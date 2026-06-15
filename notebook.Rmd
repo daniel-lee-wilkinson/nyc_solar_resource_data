@@ -1,17 +1,28 @@
 ---
-title: "New York Solar Resource Data"
+title: "US Solar Resource Data"
 author: "Daniel Wilkinson"
 date: "`r Sys.Date()`"
 output:
-  pdf_document: default
-  html_document: default
+  pdf_document:
+    toc: true
+    latex_engine: xelatex
+header-includes:
+  - \usepackage{fvextra}
+  - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,breaksymbolleft={},commandchars=\\\{\}}
+html_document:
+    toc: true
 ---
 
 # Introduction
 
-- Data source: Data Gov API - Solar Resource data - solar data types for given US locations: `<https://developer.nlr.gov/docs/solar/solar-resource-v1/>`
+- Data source: NLR API - Solar Resource data - solar data types for given US locations: `<https://developer.nlr.gov/docs/solar/solar-resource-v1/>`
 - Output fields of interest: avg_dni, avg_lat_tilt, avg_ghi
-- Goal: extract solar resource data for New York City in JSON format and convert it to a dataframe
+- Locations: New York, Los Angeles, Austin
+- Goal: extract solar resource data for three US cities in JSON format, convert to a combined dataframe, and visualise monthly averages by location
+- Research question:
+  - if I install a 4kW rooftop solar panel in each city, how much energy would it generate per month?
+  - how many months per year does each city exceed a viable solar threshold?
+  - how much money is saved by installing the rooftop solar panel in each city?
 
 # Project Set-Up
 
@@ -20,79 +31,30 @@ library(tidyverse)
 library(httr)
 library(jsonlite)
 library(dotenv)
+library(kableExtra)
+library(formatR)
 load_dot_env(".env")
-
+knitr::opts_chunk$set(tidy = TRUE, tidy.opts = list(width.cutoff = 60))
 base_url <- "https://developer.nlr.gov"
+
+# define locations
+locations <- list(
+  list(name = "New York",    lat = 41,    lon = -75),
+  list(name = "Los Angeles", lat = 34.05, lon = -118.24),
+  list(name = "Austin",      lat = 30.27, lon = -97.74)
+)
+
+theme_set(theme_minimal())
 ```
 
 ```{r echo=FALSE}
 my_api <- Sys.getenv("MY_API")
 ```
 
-# Connect to API
+# API Function
 
-```{r}
-url <- paste0(base_url, "/api/solar/solar_resource/v1.json")
-# parameters to retrieve New York data
-parameters_list <- list(api_key = my_api, lat = 41, lon = -75)
-
-# API requests
-response <- GET(url, query = parameters_list)
-
-# Check the status of the request
-status <- status_code(response)
-
-# Extracting content
-content <- content(response,"text")
-```
-
-# Parsing the JSON into an R Object
-
-```{r}
-json_lists <- fromJSON(content) # mapping of json to R object
-str(json_lists) # data structure
-# extract output list from json_lists
-outputs <- json_lists$outputs
-# extract monthly vector `monthly` from avg_dni, avg_ghi and avg_lat_tilt
-dni_monthly <- outputs$avg_dni$monthly
-ghi_monthly <- outputs$avg_ghi$monthly
-lat_tilt_monthly <- outputs$avg_lat_tilt$monthly
-
-# create tibble from vectors, months column with month abbreviations
-# on left-most column, manually adding column names
-dataframe <- tibble::tibble("month" = month.abb, "avg_dni" = dni_monthly, "avg_ghi" = ghi_monthly, "avg_lat_tilt" = lat_tilt_monthly)
-#display dataframe
-dataframe 
-
-```
-
---> This tibble dataframe contains lists with 1 value in each.
-
-# Convert tibble to a dataframe
-
-```{r}
-outputs_list <- json_lists$outputs
-# simplify the outputs list - remove all sub-hierarchies
-# from lists and return simple named vector, using unlist()
-simplified_outputs_list <- unlist(outputs_list)
-# restructure the vector into a 2d object (matrix())
-data_matrix <-matrix(data=simplified_outputs_list, nrow=13)
-# remove annual values from last row
-data_matrix = data_matrix[-1,]
-# convert matrix to a dataframe
-df <- as.data.frame(data_matrix)
-# need to append the month back, add back column names and
-# put month as first column
-df$month <- month.abb
-names(df) <- c("avg_dni","avg_ghi","avg_lat_tilt","month")
-df <- df %>% select(month, everything())
-
-```
-
-# Putting it all together
-
-```{r}
-# combine the above steps into a single function
+```{r api-function}
+# reusable function to query the solar resource API and return a tidy dataframe
 solar_api_json_get_df <- function(endpoint, queries = list()) {
   url <- paste0(base_url, "/", endpoint)
   response <- GET(url, query = queries)
@@ -107,7 +69,7 @@ solar_api_json_get_df <- function(endpoint, queries = list()) {
   json_text <- content(response, "text")
   json_lists <- jsonlite::fromJSON(json_text)
   outputs <- json_lists$outputs
-    df <- outputs[c("avg_dni", "avg_ghi", "avg_lat_tilt")] %>%
+  df <- outputs[c("avg_dni", "avg_ghi", "avg_lat_tilt")] %>%
     lapply(function(x) unlist(x$monthly)) %>%
     as.data.frame() %>%
     `rownames<-`(NULL) %>%
@@ -115,37 +77,118 @@ solar_api_json_get_df <- function(endpoint, queries = list()) {
     select(month, everything())
   df
 }
+```
 
-# apply the function
-solar_resource_df <- solar_api_json_get_df("api/solar/solar_resource/v1.json", parameters_list)
+# Querying All Locations
+
+```{r fetch-data}
+# iterate over all locations, query the API for each, and combine into one dataframe
+solar_resource_df <- locations %>%
+  lapply(function(loc) {
+    solar_api_json_get_df(
+      "api/solar/solar_resource/v1.json",
+      queries = list(api_key = my_api, lat = loc$lat, lon = loc$lon)
+    ) %>%
+      mutate(location = loc$name)
+  }) %>%
+  bind_rows()
+
 solar_resource_df
 ```
 
-# Visualizing New York City Solar Resource Data
+# Visualising Solar Resource Data by Location
 
-```{r echo=FALSE, eval=FALSE}
-# x axis labels ordered alphabetically
-solar_resource_df %>%
-  arrange(month) %>%
-  ggplot(aes(x = month, y = avg_dni)) +
-  geom_line(group = 1) +
-  geom_point() + 
-  theme_bw() + labs(x = "Month",y="Average DNI")
+I analyse solar resource data over three dimensions: irradiance distribution, seasonality and financial return. 
+
+```{r plot-dni}
+# Average DNI by month, coloured by location
+# Los Angeles shows the highest and most stable DNI year-round;
+# New York and Austin show stronger seasonal variation.
+# reusable plot function
+plot_solar_metric <- function(data, metric, title, y_label) {
+  data %>%
+    mutate(month = factor(month, levels = month.abb)) %>%
+    ggplot(aes(x = month, y = .data[[metric]], colour = location, group = location)) +
+    geom_line() +
+    geom_point() +
+    labs(title = title, x = "Month", y = y_label, colour = "Location")
+}
+
+# one call per metric
+plot_solar_metric(solar_resource_df, "avg_dni", 
+                  "Average Direct Normal Irradiance by Month", "Average DNI")
+
+plot_solar_metric(solar_resource_df, "avg_ghi", 
+                  "Average Global Horizontal Irradiance by Month", "Average GHI")
+
+plot_solar_metric(solar_resource_df, "avg_lat_tilt", 
+                  "Average Latitude Tilt Irradiance by Month", "Average Latitude Tilt")
 ```
 
-```{r}
-# order the x axis labels by month abbreviation (Jan--> December)
-solar_resource_df %>%
-  mutate(month = factor(month, levels = month.abb)) %>%
-  arrange(month) %>%
-  ggplot(aes(x = month, y = avg_dni)) +
-  geom_line(group = 1) +
-  geom_point() + 
-  theme_bw() +labs(x="Month",y="Average DNI")
+The plots show that Los Angeles has the highest and most consistent solar resource across all three metrics year-round. Austin shows strong summer peaks. New York has the most pronounced seasonal variation, with the lowest winter values of the three cities.
 
+# Solar Irradiance
+
+```{r irradiance-boxplot}
+solar_resource_df %>%
+  ggplot(aes(x = location, y = avg_dni)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.1, size = 2, alpha = 0.6) +
+  labs(title = "Distribution of Monthly DNI by Location",
+       x = NULL, y = "Average DNI")
 ```
 
-The operation `solar_resource_df %>%
-  mutate(month = factor(month, levels = month.abb))` converts the month into a factor, uses the month abbrevations, and orders chronologically. Without the factor, the month abbreviations are alphabetical on the plot instead.
-  
-The figures show that, in New York, the maximum average DNI is in July (summer) and the minimum average is in November (winter), matching expectations
+The average DNI in New York is significnatly different from Los Angeles and Austin but has the small range and low mean. Therefore New York is least suitable for solar based on resource alone. However, as shown below, its high electricity price partially compensates.
+
+# Seasonality Ratio
+
+How much worse is the worst month compared to the best?
+```{r seasonality}
+solar_resource_df %>%
+  group_by(location) %>%
+  summarise(
+    seasonality_ratio = min(avg_ghi) / max(avg_ghi)
+  )
+```
+
+The seasonality ratio in Austin (0.409) > Los Angeles (0.369) > New York (0.279). This suggests that battery storage would need to be largest in New York.
+
+# Energy Generation per Month
+```{r energy_generation}
+# How much energy would be generated by month given a panel with 0.175
+# efficiency solar_resource_df. 
+# Which city has the best return on investment for solar?
+
+# costs per kwh from https://www.chooseenergy.com/electricity-rates-by-state/ (June 2026)
+solar_resource_df %>%
+  mutate(
+    cost_per_kwh = case_when(
+      location == "Austin"      ~ 16.39,
+      location == "New York"    ~ 28.55,
+      location == "Los Angeles" ~ 33.35
+    ),
+    # energy output: panel_size (kW) * avg_ghi * efficiency * days in month
+    monthly_kwh     = 5 * avg_ghi * 0.18 * 30.4,
+    # money saved by not buying that electricity from the grid
+    monthly_savings = monthly_kwh * (cost_per_kwh / 100)  # convert cents to dollars
+  ) %>%
+  group_by(location) %>%
+  summarise(
+    annual_kwh     = sum(monthly_kwh),
+    annual_savings = sum(monthly_savings)
+  ) %>%
+  arrange(desc(annual_savings))
+
+# How many months per year does each city exceed a viable solar threshold?
+# (set as 4 kWh/m2/day)
+solar_resource_df %>%
+  group_by(location) %>%
+  mutate(feasible = ifelse(avg_ghi > 4, "feasible", "not feasible")) %>%
+  summarise(feasible_months = sum(avg_ghi > 4))
+```
+
+In terms of solar irradiance, Austin has the same number of feasible months as Los Angeles (8), and New York has fewer (6). However, in terms of electricity prices, the savings from using a rooftop solar panel in New York are greater than in Austin ($362 vs $255). Los Angeles performs best in terms of solar irradiance (average 1930 kwh/m2/year) and savings ($579).
+
+# Conclusion
+
+This analysis compared rooftop solar potential across New York, Los Angeles, and Austin using irradiance data from the NLR API. Los Angeles has the strongest solar resource, generating an estimated 1,737 kWh/year from a 5kW panel, but all three cities exceed the 4 kWh/m²/day viability threshold for at least six months of the year. The most counterintuitive finding is that New York, despite having the weakest solar irradiance and the fewest viable months, produces the second-highest annual savings ($362) due to its high electricity price of 28.55¢/kWh. Austin, despite matching Los Angeles on feasible months, produces the lowest savings ($255) because its electricity price is less than half that of the other two cities. These results suggest that electricity price is as important as solar resource when evaluating rooftop solar investment, and that New York residents in particular may be underestimating the financial case for solar adoption.
