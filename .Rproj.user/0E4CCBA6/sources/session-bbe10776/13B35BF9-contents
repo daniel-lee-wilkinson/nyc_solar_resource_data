@@ -9,7 +9,7 @@ output:
 
 # Introduction
 
-- Data source: Data Gov API - Solar Resource data - solar data types for given US locations: `<https://developer.nrel.gov/docs/solar/solar-resource-v1/>`
+- Data source: Data Gov API - Solar Resource data - solar data types for given US locations: `<https://developer.nlr.gov/docs/solar/solar-resource-v1/>`
 - Output fields of interest: avg_dni, avg_lat_tilt, avg_ghi
 - Goal: extract solar resource data for New York City in JSON format and convert it to a dataframe
 
@@ -19,18 +19,20 @@ output:
 library(tidyverse)
 library(httr)
 library(jsonlite)
+library(dotenv)
+load_dot_env(".env")
 
+base_url <- "https://developer.nlr.gov"
 ```
 
 ```{r echo=FALSE}
-my_api = "Y4bmMjaDbGd2fm9QpgneYbw8P8VltABqDMx5J6dZ"
-
+my_api <- Sys.getenv("MY_API")
 ```
 
 # Connect to API
 
 ```{r}
-url <- "https://developer.nrel.gov/api/solar/solar_resource/v1.json"
+url <- paste0(base_url, "/api/solar/solar_resource/v1.json")
 # parameters to retrieve New York data
 parameters_list <- list(api_key = my_api, lat = 41, lon = -75)
 
@@ -92,7 +94,7 @@ df <- df %>% select(month, everything())
 ```{r}
 # combine the above steps into a single function
 solar_api_json_get_df <- function(endpoint, queries = list()) {
-  url <- modify_url("https://developer.nrel.gov", path = endpoint)
+  url <- paste0(base_url, "/", endpoint)
   response <- GET(url, query = queries)
   if (http_error(response)) {
     print(status_code(response))
@@ -119,9 +121,9 @@ solar_resource_df <- solar_api_json_get_df("api/solar/solar_resource/v1.json", p
 solar_resource_df
 ```
 
-# Visualizing New Yord City Solar Resource Data
+# Visualizing New York City Solar Resource Data
 
-```{r}
+```{r echo=FALSE, eval=FALSE}
 # x axis labels ordered alphabetically
 solar_resource_df %>%
   arrange(month) %>%
@@ -147,4 +149,3 @@ The operation `solar_resource_df %>%
   mutate(month = factor(month, levels = month.abb))` converts the month into a factor, uses the month abbrevations, and orders chronologically. Without the factor, the month abbreviations are alphabetical on the plot instead.
   
 The figures show that, in New York, the maximum average DNI is in July (summer) and the minimum average is in November (winter), matching expectations
-  
