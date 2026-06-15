@@ -1,6 +1,14 @@
 # Created by https://www.toptal.com/developers/gitignore/api/r
 # Edit at https://www.toptal.com/developers/gitignore?templates=r
 
+### Environment ###
+.env
+
+### Outputs ###
+
+notebook.pdf
+README.html
+
 ### R ###
 # History files
 .Rhistory
@@ -24,6 +32,7 @@
 
 # RStudio files
 .Rproj.user/
+
 
 # produced vignettes
 vignettes/*.html
